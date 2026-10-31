@@ -42,6 +42,28 @@ def main():
             writer.writeheader()
             writer.writerows(rows)
         c.prepare(SimpleNamespace(manifest=str(root / 'manifest.csv'), output=str(root / 'data.npz'), window=32, hop=32))
+        overlapping = rows + [{**rows[0], 'split': 'test'}]
+        with (root / 'overlap.csv').open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(overlapping)
+        try:
+            c.prepare(SimpleNamespace(manifest=str(root / 'overlap.csv'), output=str(root / 'invalid.npz'),
+                                      window=32, hop=32, guarded_seen=True))
+        except ValueError as error:
+            assert 'guard band' in str(error)
+        else:
+            raise AssertionError('Overlapping train/test recording segments must be rejected')
+        guarded = [{**row, 'start': 0, 'stop': 32 if i == 0 else 128} for i, row in enumerate(rows)]
+        guarded.append({**rows[0], 'split': 'test', 'start': 96, 'stop': 128})
+        with (root / 'guarded.csv').open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(guarded[0]))
+            writer.writeheader()
+            writer.writerows(guarded)
+        c.prepare(SimpleNamespace(manifest=str(root / 'guarded.csv'), output=str(root / 'guarded.npz'),
+                                  window=32, hop=32, guarded_seen=True))
+        with np.load(root / 'guarded.npz') as guarded_data:
+            assert set(guarded_data['start'][guarded_data['group'] == rows[0]['group']]) == {0, 96}
         c.train(SimpleNamespace(data=str(root / 'data.npz'), output=str(root / 'model'), epochs=1, batch=4, seed=0))
         state = torch.load(root / 'model/model.pt', weights_only=False)
         first, second = c.Classifier(1, 2), c.Classifier(1, 2)
@@ -53,11 +75,13 @@ def main():
             args = SimpleNamespace(data=str(root / 'data.npz'), model=str(root / 'model/model.pt'),
                                    output=str(root / variant), variant=variant, seed=0, missing=.25,
                                    spikes=0., noise=0., gap='block', buffer=30, alpha=.1, minimum=80,
-                                   safe=1, distance=100., confidence=0., delay=2, bootstrap=4, rolling=2)
+                                   safe=1, distance=100., confidence=0., delay=2, corruption_after=2, bootstrap=4, rolling=2)
             c.evaluate(args)
             records = json.loads((root / variant / 'decisions.json').read_text())
             metric = json.loads((root / variant / 'metrics.json').read_text())
             assert metric['coverage'] == sum(r['covered'] for r in records) / len(records)
+            assert all(r['observed_fraction'] == 1 for r in records[:2])
+            assert all(r['observed_fraction'] == .75 for r in records[2:])
             assert all(abs(r['alpha'] - .1) < 1e-12 for r in records[:3])
             if variant == 'no_blending':
                 assert all(r['local_weight'] == 1 for r in records)

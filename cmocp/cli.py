@@ -38,32 +38,49 @@ def scores(probability, randomizer, penalty=.01, rank_start=3):
 
 def prepare(args):
     rows = list(csv.DictReader(open(args.manifest, encoding='utf-8')))
-    groups, xs, ys, splits, contexts, identities = {}, [], [], [], [], []
+    groups, xs, ys, splits, contexts, identities, starts = {}, [], [], [], [], [], []
     for row in rows:
         if row['split'] not in ('train', 'val', 'cal', 'test'):
             raise ValueError('split must be train, val, cal or test')
-        if row['group'] in groups and groups[row['group']] != row['split']:
-            raise ValueError('A source recording occurs in more than one partition')
-        groups[row['group']] = row['split']
+        groups.setdefault(row['group'], [])
         path = Path(args.manifest).parent / row['path']
         signal = np.asarray(loadmat(path)[row['key']] if path.suffix == '.mat' else np.load(path)).squeeze()
         if signal.ndim == 1:
             signal = signal[None]
         if signal.ndim != 2 or not np.isfinite(signal).all():
             raise ValueError('Signals must have shape channels,samples')
-        for t in range(0, signal.shape[-1] - args.window + 1, args.hop):
+        begin, end = int(row.get('start') or 0), int(row.get('stop') or signal.shape[-1])
+        if not 0 <= begin < end <= signal.shape[-1]:
+            raise ValueError('Manifest start/stop must define a valid source-sample interval')
+        groups[row['group']].append((row['split'], begin, end, str(path.resolve()), row['key']))
+        signal = signal[:, begin:end]
+        positions = list(range(0, signal.shape[-1] - args.window + 1, args.hop))
+        if getattr(args, 'max_windows_per_record', None):
+            positions = positions[:args.max_windows_per_record]
+        for t in positions:
             xs.append(signal[:, t:t + args.window])
             ys.append(int(row['label']))
             splits.append(row['split'])
             contexts.append([float(row['rpm']), float(row['load'])])
             identities.append(row['group'])
+            starts.append(begin + t)
+    for segments in groups.values():
+        if len({row[0] for row in segments}) > 1:
+            if not getattr(args, 'guarded_seen', False) or {row[0] for row in segments} != {'train', 'test'}:
+                raise ValueError('A source recording occurs in more than one partition')
+            if len({row[3:] for row in segments}) != 1:
+                raise ValueError('Guarded segments must refer to the same physical recording/key')
+            for first in segments:
+                for second in segments:
+                    if first[0] != second[0] and max(first[1], second[1]) - min(first[2], second[2]) < 2 * args.window:
+                        raise ValueError('Seen-regime train/test segments require a two-window guard band')
     x, split = np.asarray(xs, dtype=np.float32), np.asarray(splits)
     if set(split) != {'train', 'val', 'cal', 'test'}:
         raise ValueError('Four nonempty partitions are required')
     mean = x[split == 'train'].mean((0, 2), keepdims=True)
     std = x[split == 'train'].std((0, 2), keepdims=True).clip(1e-6)
     np.savez_compressed(args.output, x=(x - mean) / std, y=ys, split=split,
-                        context=contexts, group=identities, mean=mean, std=std)
+                        context=contexts, group=identities, start=starts, mean=mean, std=std)
 
 
 def train(args):
@@ -116,11 +133,14 @@ def evaluate(args):
     model.eval()
     ids = np.flatnonzero(np.isin(d['split'], ['cal', 'test']))
     probabilities, embeddings, masks = [], [], []
+    test_tick = -1
     with torch.no_grad():
         for i in ids:
             x = d['x'][i].copy()
             mask = np.ones_like(x)
             if d['split'][i] == 'test':
+                test_tick += 1
+            if d['split'][i] == 'test' and test_tick >= getattr(args, 'corruption_after', 0):
                 count = round(args.missing * x.size)
                 if args.gap == 'random':
                     mask.flat[rng.choice(x.size, count, replace=False)] = 0
@@ -183,7 +203,7 @@ def evaluate(args):
         record = {'index': int(ids[i]), 'tick': tick, 'label': int(y[i]), 'prediction': int(p[i].argmax()),
                   'group': str(d['group'][ids[i]]), 'regime': d['context'][ids[i]].tolist(),
                   'set': prediction_set, 'accepted': bool(accepted), 'action': action, 'covered': covered,
-                  'neff': float(neff), 'local_weight': float(blend), 'alpha': alpha, 'buffer': len(buffer),
+                  'observed_fraction': float(masks[i].mean()), 'neff': float(neff), 'local_weight': float(blend), 'alpha': alpha, 'buffer': len(buffer),
                   'priority': len(prediction_set) + max(0, args.safe - neff) + float(np.sqrt(distance.min()))}
         queue.append((tick + args.delay, i, covered))
         while queue and queue[0][0] <= tick:
@@ -253,6 +273,8 @@ def main():
     p.add_argument('--output', required=True)
     p.add_argument('--window', type=int, default=2048)
     p.add_argument('--hop', type=int, default=1024)
+    p.add_argument('--guarded-seen', action='store_true')
+    p.add_argument('--max-windows-per-record', type=int)
     p = sub.add_parser('train')
     for key in ['data', 'output']:
         p.add_argument('--' + key, required=True)
@@ -266,7 +288,7 @@ def main():
     p.add_argument('--gap', choices=['random', 'block', 'channel'], default='block')
     for key, default in [('missing', .3), ('spikes', .01), ('noise', 0.), ('alpha', .1), ('distance', 10.), ('confidence', .5)]:
         p.add_argument('--' + key, type=float, default=default)
-    for key, default in [('delay', 25), ('buffer', 1200), ('minimum', 80), ('safe', 40), ('seed', 0), ('rolling', 50), ('bootstrap', 2000)]:
+    for key, default in [('delay', 25), ('corruption-after', 0), ('buffer', 1200), ('minimum', 80), ('safe', 40), ('seed', 0), ('rolling', 50), ('bootstrap', 2000)]:
         p.add_argument('--' + key, type=int, default=default)
     args = parser.parse_args()
     if args.command == 'evaluate' and (not 0 <= args.missing <= 1 or not 0 <= args.spikes <= 1 or args.delay < 0):
