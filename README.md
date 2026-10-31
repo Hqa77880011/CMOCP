@@ -38,7 +38,7 @@ cmocp evaluate --data bearing.npz --model outputs/classifier/model.pt --output o
 
 ## Ablations
 
-Supported controls: `aps`, `raps`, `aci`, `regime`, `no_regime`, `no_mask`, `no_online`, `no_gate`. Reuse the same inputs, seed and budget. For retrained controls, evaluate the corresponding saved model.
+Supported controls: `aps`, `raps`, `aci`, `regime`, `no_regime`, `no_mask`, `no_online`, `no_gate`, `no_blending`. Reuse the same inputs, seed and budget. For retrained controls, evaluate the corresponding saved model.
 
 ```bash
 cmocp evaluate --data bearing.npz --model outputs/classifier/model.pt --output outputs/aps --variant aps --missing 0.3 --gap block --spikes 0.01 --delay 25 --seed 0
@@ -50,7 +50,7 @@ Preparation writes `bearing.npz`; training writes `model.pt` and `history.json`.
 
 ## Implementation and functional validation
 
-This update reuses the manuscript-based classifier/calibrator, aligns the randomized RAPS score with the paper's explicit `u` convention, derives class taxonomy from training labels, and fixes NumPy boolean serialization in decision output. Original recording manifests, training artifacts and paper experiment runs are not supplied here.
+This update reuses the manuscript-based classifier/calibrator, aligns the randomized RAPS score with the paper's explicit `u` convention, derives class taxonomy from training labels, and fixes NumPy boolean serialization in decision output, and implements the supplementary `no_blending` control. `decisions.json` includes the local-distribution weight used at each step; no-blending fixes it to one. Original recording manifests, training artifacts and paper experiment runs are not supplied here.
 
 | Paper module / metric | Entry | Command / output |
 | --- | --- | --- |
@@ -60,4 +60,4 @@ This update reuses the manuscript-based classifier/calibrator, aligns the random
 | Group/marginal coverage, set size, selective risk, maintenance cost | `evaluate`, `wilson` | `metrics.json`, `decisions.json` |
 | Functional validation | `smoke.py` | `python smoke.py` |
 
-`python smoke.py` passed on Python 3.13.5 / torch 2.7.1+cu118 CPU, seed 0, torch/BLAS threads 1. It reads raw NPY recordings through a manifest, prepares four partitions, trains one epoch, checks nonzero classifier gradients/updates and identical checkpoint predictions, runs full/APS/no-online streams, verifies delay timing and hand-computed RAPS/Wilson/coverage values. Synthetic signals validate behavior only. Original CWRU load rotations and long shifted-stream results remain unverified; backbone capacity and fixed kernel scales are documented implementation choices rather than recovered original experiment settings.
+`python smoke.py` passed on Python 3.13.5 / torch 2.7.1+cu118 CPU, seed 0, torch/BLAS threads 1. It reads raw NPY recordings through a manifest, prepares four partitions, trains one epoch, checks nonzero classifier gradients/updates and identical checkpoint predictions, runs full/APS/no-online/no-blending streams, verifies delay timing and hand-computed RAPS/Wilson/coverage values. Synthetic signals validate behavior only. Original CWRU load rotations and long shifted-stream results remain unverified; backbone capacity and fixed kernel scales are documented implementation choices rather than recovered original experiment settings.

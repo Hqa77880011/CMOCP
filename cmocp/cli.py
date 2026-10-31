@@ -168,7 +168,7 @@ def evaluate(args):
         w = np.exp(logw - logw.max())
         w /= w.sum()
         neff = 1 / np.square(w).sum()
-        blend = min(1., neff / args.minimum)
+        blend = 1. if args.variant == 'no_blending' else min(1., neff / args.minimum)
         w = blend * w + (1 - blend) / len(w)
         order = np.argsort([v['score'] for v in buffer])
         threshold_index = min(np.searchsorted(w[order].cumsum(), 1 - alpha), len(w) - 1)
@@ -183,7 +183,7 @@ def evaluate(args):
         record = {'index': int(ids[i]), 'tick': tick, 'label': int(y[i]), 'prediction': int(p[i].argmax()),
                   'group': str(d['group'][ids[i]]), 'regime': d['context'][ids[i]].tolist(),
                   'set': prediction_set, 'accepted': bool(accepted), 'action': action, 'covered': covered,
-                  'neff': float(neff), 'alpha': alpha, 'buffer': len(buffer),
+                  'neff': float(neff), 'local_weight': float(blend), 'alpha': alpha, 'buffer': len(buffer),
                   'priority': len(prediction_set) + max(0, args.safe - neff) + float(np.sqrt(distance.min()))}
         queue.append((tick + args.delay, i, covered))
         while queue and queue[0][0] <= tick:
@@ -262,7 +262,7 @@ def main():
     p = sub.add_parser('evaluate')
     for key in ['data', 'model', 'output']:
         p.add_argument('--' + key, required=True)
-    p.add_argument('--variant', choices=['full', 'aps', 'raps', 'aci', 'regime', 'no_regime', 'no_mask', 'no_online', 'no_gate'], default='full')
+    p.add_argument('--variant', choices=['full', 'aps', 'raps', 'aci', 'regime', 'no_regime', 'no_mask', 'no_online', 'no_gate', 'no_blending'], default='full')
     p.add_argument('--gap', choices=['random', 'block', 'channel'], default='block')
     for key, default in [('missing', .3), ('spikes', .01), ('noise', 0.), ('alpha', .1), ('distance', 10.), ('confidence', .5)]:
         p.add_argument('--' + key, type=float, default=default)

@@ -49,16 +49,20 @@ def main():
         second.load_state_dict(state['state'])
         first.eval(); second.eval()
         torch.testing.assert_close(first(x, torch.ones_like(x))[0], second(x, torch.ones_like(x))[0], rtol=0, atol=0)
-        for variant in ['full', 'aps', 'no_online']:
+        for variant in ['full', 'aps', 'no_online', 'no_blending']:
             args = SimpleNamespace(data=str(root / 'data.npz'), model=str(root / 'model/model.pt'),
                                    output=str(root / variant), variant=variant, seed=0, missing=.25,
-                                   spikes=0., noise=0., gap='block', buffer=30, alpha=.1, minimum=2,
+                                   spikes=0., noise=0., gap='block', buffer=30, alpha=.1, minimum=80,
                                    safe=1, distance=100., confidence=0., delay=2, bootstrap=4, rolling=2)
             c.evaluate(args)
             records = json.loads((root / variant / 'decisions.json').read_text())
             metric = json.loads((root / variant / 'metrics.json').read_text())
             assert metric['coverage'] == sum(r['covered'] for r in records) / len(records)
             assert all(abs(r['alpha'] - .1) < 1e-12 for r in records[:3])
+            if variant == 'no_blending':
+                assert all(r['local_weight'] == 1 for r in records)
+            if variant == 'full':
+                assert records[0]['local_weight'] < 1
             if variant == 'no_online':
                 assert len(set(r['buffer'] for r in records)) == 1
             assert (root / variant / 'coverage.png').stat().st_size > 0
