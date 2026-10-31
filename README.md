@@ -48,4 +48,16 @@ cmocp evaluate --data bearing.npz --model outputs/classifier/model.pt --output o
 
 Preparation writes `bearing.npz`; training writes `model.pt` and `history.json`. Evaluation writes `decisions.json`, `metrics.json` and `coverage.png` to its output folder.
 
-Source inspection: Python 3.13.5, numpy 2.1.3, scipy 1.15.3, torch 2.7.1+cu118, scikit-learn 1.6.1, matplotlib 3.10.0 (installed versions inspected). Checks covered Python syntax, configuration parsing and CLI arguments. No training, full evaluation or CI was run in this update.
+## Implementation and functional validation
+
+This update reuses the manuscript-based classifier/calibrator, aligns the randomized RAPS score with the paper's explicit `u` convention, derives class taxonomy from training labels, and fixes NumPy boolean serialization in decision output. Original recording manifests, training artifacts and paper experiment runs are not supplied here.
+
+| Paper module / metric | Entry | Command / output |
+| --- | --- | --- |
+| Group-disjoint preparation / train-only signal scaling | `prepare` | `cmocp prepare ...` |
+| Fixed classifier | `Classifier`, `train` | `cmocp train ...` |
+| RAPS, context-mask-recency weighting, delayed update/gate | `scores`, `evaluate` | `cmocp evaluate ...` |
+| Group/marginal coverage, set size, selective risk, maintenance cost | `evaluate`, `wilson` | `metrics.json`, `decisions.json` |
+| Functional validation | `smoke.py` | `python smoke.py` |
+
+`python smoke.py` passed on Python 3.13.5 / torch 2.7.1+cu118 CPU, seed 0, torch/BLAS threads 1. It reads raw NPY recordings through a manifest, prepares four partitions, trains one epoch, checks nonzero classifier gradients/updates and identical checkpoint predictions, runs full/APS/no-online streams, verifies delay timing and hand-computed RAPS/Wilson/coverage values. Synthetic signals validate behavior only. Original CWRU load rotations and long shifted-stream results remain unverified; backbone capacity and fixed kernel scales are documented implementation choices rather than recovered original experiment settings.

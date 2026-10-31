@@ -29,7 +29,7 @@ class Classifier(nn.Module):
 def scores(probability, randomizer, penalty=.01, rank_start=3):
     order = np.argsort(-probability)
     ranked = probability[order]
-    ranked_scores = np.cumsum(ranked) - randomizer * ranked
+    ranked_scores = np.cumsum(ranked) - (1 - randomizer) * ranked
     ranked_scores += penalty * np.maximum(np.arange(1, len(ranked) + 1) - rank_start, 0)
     result = np.empty_like(ranked_scores)
     result[order] = ranked_scores
@@ -70,7 +70,10 @@ def train(args):
     torch.manual_seed(args.seed)
     d = np.load(args.data)
     x, y = torch.tensor(d['x']), torch.tensor(d['y'], dtype=torch.long)
-    model = Classifier(x.shape[1], int(y.max()) + 1)
+    classes = np.unique(d['y'][d['split'] == 'train'])
+    if not np.array_equal(classes, np.arange(len(classes))) or not np.isin(d['y'], classes).all():
+        raise ValueError('Training labels must define the consecutive registered taxonomy for every partition')
+    model = Classifier(x.shape[1], len(classes))
     opt = torch.optim.Adam(model.parameters(), lr=.001)
     train_ids = torch.tensor(np.flatnonzero(d['split'] == 'train'))
     val_ids = torch.tensor(np.flatnonzero(d['split'] == 'val'))
@@ -91,7 +94,7 @@ def train(args):
         history.append({'epoch': epoch + 1, 'val_loss': val})
         if val < best:
             best = val
-            torch.save({'state': model.state_dict(), 'channels': x.shape[1], 'classes': int(y.max()) + 1}, out / 'model.pt')
+            torch.save({'state': model.state_dict(), 'channels': x.shape[1], 'classes': len(classes)}, out / 'model.pt')
     (out / 'history.json').write_text(json.dumps(history, indent=2))
 
 
@@ -179,7 +182,7 @@ def evaluate(args):
         covered = int(y[i]) in prediction_set
         record = {'index': int(ids[i]), 'tick': tick, 'label': int(y[i]), 'prediction': int(p[i].argmax()),
                   'group': str(d['group'][ids[i]]), 'regime': d['context'][ids[i]].tolist(),
-                  'set': prediction_set, 'accepted': accepted, 'action': action, 'covered': covered,
+                  'set': prediction_set, 'accepted': bool(accepted), 'action': action, 'covered': covered,
                   'neff': float(neff), 'alpha': alpha, 'buffer': len(buffer),
                   'priority': len(prediction_set) + max(0, args.safe - neff) + float(np.sqrt(distance.min()))}
         queue.append((tick + args.delay, i, covered))
