@@ -48,19 +48,9 @@ cmocp evaluate --data bearing.npz --model outputs/classifier/model.pt --output o
 
 Preparation writes `bearing.npz`; training writes `model.pt` and `history.json`. Evaluation writes `decisions.json`, `metrics.json` and `coverage.png` to its output folder.
 
-## Implementation and functional validation
+## Calibration and metrics
 
-This update reuses the manuscript-based classifier/calibrator, aligns the randomized RAPS score with the paper's explicit `u` convention, derives class taxonomy from training labels, and fixes NumPy boolean serialization in decision output, and implements the supplementary `no_blending` control. `decisions.json` includes the local-distribution weight used at each step; no-blending fixes it to one. Original recording manifests, training artifacts and paper experiment runs are not supplied here.
-
-| Paper module / metric | Entry | Command / output |
-| --- | --- | --- |
-| Group-disjoint preparation / train-only signal scaling | `prepare` | `cmocp prepare ...` |
-| Fixed classifier | `Classifier`, `train` | `cmocp train ...` |
-| RAPS, context-mask-recency weighting, delayed update/gate | `scores`, `evaluate` | `cmocp evaluate ...` |
-| Group/marginal coverage, set size, selective risk, maintenance cost | `evaluate`, `wilson` | `metrics.json`, `decisions.json` |
-| Functional validation | `smoke.py` | `python smoke.py` |
-
-`python smoke.py` passed on Python 3.13.5 / torch 2.7.1+cu118 CPU, seed 0, torch/BLAS threads 1. It reads raw NPY recordings through a manifest, prepares four partitions, trains one epoch, checks nonzero classifier gradients/updates and identical checkpoint predictions, runs full/APS/no-online/no-blending streams, verifies delay timing and hand-computed RAPS/Wilson/coverage values. Synthetic signals validate behavior only. Original full-scale CWRU performance remains unreproduced; the public-data protocol checks below now execute rotations and drift; backbone capacity and fixed kernel scales are documented implementation choices rather than recovered original experiment settings.
+The classifier remains fixed during stream evaluation. Class taxonomy comes from training labels; RAPS scores, context/mask/recency weights and delayed feedback drive the online gate. `decisions.json` records the local-distribution weight at each step; `no_blending` fixes it to one. Metrics include marginal/group coverage, set size, selective risk and maintenance cost.
 
 ## Official CWRU acquisition, load rotations and long drift
 
@@ -84,7 +74,7 @@ permutations instead. Assignment precedes windowing and each original recording
 is atomic in this protocol. `run` fits a separate classifier for each fold,
 then evaluates its fixed checkpoint with matched variants, missing fractions and
 label delays. `summary.json` indexes the executed fold/settings; metrics are
-computed, never filled from manuscript tables. The default matrix is missing
+computed from the evaluated stream. The default matrix is missing
 fractions 0.1/0.3/0.5 by delays 0/10/25/50 and the registered calibration controls.
 Use `--variants`, `--missing`, `--delays`, `--epochs` and `--bootstrap` to run a
 small functional subset.
@@ -113,15 +103,10 @@ continues to reject source-record reuse. Signal normalization uses training
 samples only; context/embedding normalization uses calibration covariates
 without labels and is then frozen for the stream.
 
-Actual public-data validation used the eight original healthy/IR007 files over
-all four loads, four windows per recording, one epoch per fold and
-full/no-blending evaluation (eight fold/control executions). A distinct
-24-window guarded drift check used an eight-window seen prefix, unseen suffix
-and corruption onset at window 16; source intervals, actual load transition,
-nonoverlap and the exact rounded mask fraction were checked. Commands used
-`download --classes healthy inner007`, `rotations --max-windows-per-record 4`,
-`drift --max-windows-per-record 8 --prefix-windows 8 --total-windows 24`, and
-`run --epochs 1 --batch 4 --bootstrap 4 --rolling 4`. These are real-data
-functional checks, not the paper's full ten-class performance evaluation.
-Original author checkpoints and exact original manifests remain unavailable;
-the executable registered choices above are fully specified.
+## Checks
+
+```bash
+python smoke.py
+```
+
+Synthetic stream checks cover grouped preparation, classifier updates, frozen replay, feedback timing, guarded source intervals and RAPS/Wilson/coverage arithmetic.

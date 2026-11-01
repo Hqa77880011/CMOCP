@@ -1,4 +1,4 @@
-"""Synthetic stream check; outputs are not paper results."""
+"""Synthetic checks for online conformal streams."""
 import csv
 import json
 import tempfile
